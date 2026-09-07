@@ -110,7 +110,7 @@ def plot_ncrit_transition_sensitivity(op, asol) -> None:
 
     if not any_crossing:
         ax.text(
-            0.97, 0.30, "Baseline separates before\nselected N_crit values.",
+            0.97, 0.30, r"Baseline separates before" "\n" r"selected $N_{crit}$ values.",
             transform=ax.transAxes, ha="right", va="center", fontsize=10.5, color=SEP_COLOR,
             bbox=dict(boxstyle="round", fc="#fdecea", ec=SEP_COLOR, lw=1.0),
         )
@@ -140,8 +140,8 @@ def plot_transition_reynolds_map() -> None:
     fig, ax = plt.subplots(figsize=(7.8, 5.0))
 
     marker_for_status = {
-        TransitionStatus.N_CRIT_CROSSING: ("o", "#1a7a3c", "N_crit crossing"),
-        TransitionStatus.SEPARATION_BEFORE_N_CRIT: ("x", SEP_COLOR, "separation before N_crit"),
+        TransitionStatus.N_CRIT_CROSSING: ("o", "#1a7a3c", r"$N_{crit}$ crossing"),
+        TransitionStatus.SEPARATION_BEFORE_N_CRIT: ("x", SEP_COLOR, r"separation before $N_{crit}$"),
         TransitionStatus.NO_EVENT_IN_DOMAIN: ("s", "0.5", "no event in domain"),
     }
     seen_labels = set()

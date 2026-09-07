@@ -36,7 +36,7 @@ FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 DPI = 150
 
 CAVEAT = "Generic reduced-order model — illustrative only, not experimentally validated."
-NCRIT_CAVEAT = "No N_crit selected — this figure does not predict transition."
+NCRIT_CAVEAT = r"No $N_{crit}$ selected — this figure does not predict transition."
 
 ONSET_COLOR = "#1a7a3c"
 SEP_COLOR = "#a83232"
@@ -147,7 +147,7 @@ def plot_n_factor_growth(op, asol) -> None:
     ax.set_xlabel(r"nondimensional chordwise coordinate, $x/c$")
     ax.set_ylabel(r"amplification factor, $N = \ln(A/A_0)$")
     ax.set_title(
-        "e^N Amplification-Factor Growth (reduced-order proxy)\n" + NCRIT_CAVEAT
+        r"$e^N$ Amplification-Factor Growth (reduced-order proxy)" "\n" + NCRIT_CAVEAT
     )
     ax.set_xlim(0.0, min(1.0, asol.s_sep * 1.15))
     ax.set_ylim(0.0, asol.n_max * 1.22)

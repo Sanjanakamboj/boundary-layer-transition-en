@@ -160,8 +160,8 @@ def plot_transition_mechanism_map() -> None:
     def classify(r) -> str:
         if r.mechanism == "ATTACHED_E_N_CROSSING":
             if r.turbulent_status == "COMPLETED_TO_TE":
-                return "attached e^N crossing, reaches TE"
-            return "attached e^N crossing, later turb. sep."
+                return r"attached $e^N$ crossing, reaches TE"
+            return r"attached $e^N$ crossing, later turb. sep."
         if r.bubble_status == "OPEN_SEPARATION":
             return "open separation"
         if r.bubble_status == "TURBULENT_REATTACHMENT":
@@ -171,24 +171,24 @@ def plot_transition_mechanism_map() -> None:
         return "no event"
 
     categories = [
-        "attached e^N crossing, reaches TE",
-        "attached e^N crossing, later turb. sep.",
+        r"attached $e^N$ crossing, reaches TE",
+        r"attached $e^N$ crossing, later turb. sep.",
         "reattached bubble, reaches TE",
         "reattached bubble, later turb. sep.",
         "open separation",
         "no event",
     ]
     colors = {
-        "attached e^N crossing, reaches TE": "#1a7a3c",
-        "attached e^N crossing, later turb. sep.": "#7fbf7f",
+        r"attached $e^N$ crossing, reaches TE": "#1a7a3c",
+        r"attached $e^N$ crossing, later turb. sep.": "#7fbf7f",
         "reattached bubble, reaches TE": "#1f5fa8",
         "reattached bubble, later turb. sep.": "#7fa8d8",
         "open separation": "#a83232",
         "no event": "0.6",
     }
     markers = {
-        "attached e^N crossing, reaches TE": "D",
-        "attached e^N crossing, later turb. sep.": "d",
+        r"attached $e^N$ crossing, reaches TE": "D",
+        r"attached $e^N$ crossing, later turb. sep.": "d",
         "reattached bubble, reaches TE": "o",
         "reattached bubble, later turb. sep.": "o",
         "open separation": "X",
@@ -422,15 +422,15 @@ def plot_model_sensitivity_ranking(op) -> None:
             abs(100 * (cd_total_bubble(BubbleParameters("x", 0.008, dxr, 5.0, 1.7)) - base_cd) / base_cd)
             for dxr in (0.007, 0.065)
         ),
-        "M5 K_theta": max(
+        r"M5 $K_{\theta}$": max(
             abs(100 * (cd_total_bubble(BubbleParameters("x", 0.008, 0.022, k, 1.7)) - base_cd) / base_cd)
             for k in (2.0, 12.0)
         ),
-        "M5 H_reattach": max(
+        r"M5 $H_{reattach}$": max(
             abs(100 * (cd_total_bubble(BubbleParameters("x", 0.008, 0.022, 5.0, h)) - base_cd) / base_cd)
             for h in (1.4, 2.3)
         ),
-        "M5 K_sep": max(
+        r"M5 $K_{sep}$": max(
             abs(100 * (cd_total_bubble(NOMINAL_BUBBLE, k_sep=k) - base_cd) / base_cd)
             for k in (0.0, 2.0)
         ),
