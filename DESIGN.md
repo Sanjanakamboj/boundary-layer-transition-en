@@ -1,9 +1,16 @@
-# DESIGN.md -- Milestone 1: Laminar Boundary-Layer Foundation and Stability Inputs
+# DESIGN.md -- Project 10 (Boundary-Layer Transition, e^N)
 
-This document records the coordinate/sign conventions, source audit,
+This document records the coordinate/sign conventions, source audits,
 derivations, numerical methods, leading-edge treatment, verification
-strategy, and validity limitations for Milestone 1 of the Project 10
-(Boundary-Layer Transition, e^N) sailplane wing study.
+strategy, and validity limitations for the Project 10 sailplane wing study.
+Milestone 1 (laminar boundary-layer foundation) is documented in Sections
+1-7 below; Milestone 2 (reduced-order stability/e^N amplification tracking)
+is documented in Section 8 onward. Milestone 1 content is unchanged from
+its original commit.
+
+---
+
+# MILESTONE 1: Laminar Boundary-Layer Foundation and Stability Inputs
 
 **Scope reminder:** Milestone 1 implements only an operating point, an
 external velocity distribution, and laminar boundary-layer solutions
@@ -317,3 +324,292 @@ implemented for every item required by the milestone:
   layers can reattach turbulently; neither phenomenon is modeled here.
   e^N amplification-factor tracking against a chosen `N_crit` (Milestone 2+)
   is required before any transition-location claim can be made.
+
+---
+
+# MILESTONE 2: Reduced-Order Linear-Stability Proxy and e^N Amplification Tracking
+
+**Scope reminder:** Milestone 2 tracks amplification only. It does **not**
+select an `N_crit`, does **not** predict a transition location, and does
+**not** compute turbulent skin friction or drag. A "modeled instability
+onset" is not a transition point; a laminar-separation diagnostic (from
+Milestone 1) is not a transition point either.
+
+## 8. Source audit (Milestone 2)
+
+Sources actually checked for this milestone (web search was used in this
+session to look for the specific Drela/Giles and Gleyzes-Cousteix-Bonnet
+envelope-amplification polynomial coefficients used inside XFOIL; the
+searches confirmed the *existence*, general *form*, and *attribution* of
+that method, but did **not** return the exact numerical polynomial
+coefficients from a primary source that could be verified with confidence.
+Per the explicit project instruction not to cite a source not actually
+checked, those exact coefficients are **not** used anywhere in this
+module):
+
+1. **e^N formalism itself** (Smith & Gamberoni 1956; van Ingen 1956, as
+   reviewed in van Ingen, "The e^N Method for Transition Prediction:
+   Historical Review of Work at TU Delft," AIAA Paper 2008-3830). Confirmed
+   via web search: van Ingen's original semi-empirical method dates to his
+   1956 Delft report (VTH-74), and the AIAA 2008-3830 historical review
+   covers the method's development at TU Delft, including boundary layers
+   with pressure gradient and separation. Used for: the definition
+   `N = ln(A/A0) = integral(-alpha_i) dx` and the general concept of
+   accumulating amplification from an instability-onset station.
+
+2. **Classical Blasius (ZPG) Tollmien-Schlichting neutral-stability point**
+   (Schlichting & Gersten, *Boundary-Layer Theory*, 9th ed., stability
+   chapters; White, *Viscous Fluid Flow*, 3rd ed., Ch. 5). This is a
+   long-standing, widely reproduced textbook result: the ZPG Blasius
+   boundary layer is linearly unstable to Tollmien-Schlichting waves only
+   above a critical Reynolds number, commonly quoted as `Re_x,crit ~ 9e4`
+   (`Re_theta,crit ~ 200`). Used as the **one sourced numerical anchor**
+   for the onset criterion in this module (`RE_THETA_CRIT_ZPG = 200`).
+   Different sources/eigenvalue solutions report this critical Reynolds
+   number with several-percent spread depending on exact disturbance
+   definition; it is used here as an order-of-magnitude-correct anchor,
+   not a razor-precise digit.
+
+3. **Drela & Giles envelope method / XFOIL** (Drela, M. and Giles, M. B.,
+   "Viscous-Inviscid Analysis of Transonic and Low Reynolds Number
+   Airfoils," *AIAA Journal*, 25(10), 1987; Drela, M., "XFOIL: An Analysis
+   and Design System for Low Reynolds Number Airfoils," 1989; underlying
+   envelope method attributed to Gleyzes, C., Cousteix, J., and Bonnet,
+   J.L., "Calculation Method of Leading Edge Separation Bubbles," 1983).
+   Web search confirmed this is the correct attribution chain and general
+   description (an envelope of Falkner-Skan-family amplification curves,
+   parameterized by `H` and `Re_theta`, curve-fit for a critical Reynolds
+   number `Re_theta,0(H)` and an envelope growth rate `dn/dReθ(H)`). The
+   search did **not** return the specific published polynomial/tanh-based
+   coefficients (e.g. the exact `log10(Re_theta,0)` correlation and the
+   `dn/dReθ` correlation) from a source this session could directly read
+   and verify digit-for-digit. **Those exact coefficients are therefore
+   NOT reproduced in this module.** This module instead implements its own
+   much simpler, explicitly labeled proxy (Section 9), which borrows only
+   the qualitative structure of the Drela/Gleyzes approach (a critical
+   `Re_theta(H)` plus an `H`-dependent growth-rate law) without claiming
+   quantitative fidelity to it.
+
+4. **Michel's criterion and the Granville criterion** (classical empirical
+   transition-onset/-location correlations). Web search confirmed these
+   exist and are widely used and cited but, again, did not return their
+   exact published numerical coefficients from a primary source this
+   session could verify directly. Neither is used quantitatively in this
+   module; they are mentioned here only as alternative reduced-order
+   approaches this project consciously did not adopt (see "why not
+   Michel/Granville" below).
+
+**Why a project-defined proxy instead of Michel/Granville/Drela-Gleyzes
+verbatim:** the assignment explicitly permits (and, given the verification
+constraints above, requires) implementing "a clearly labeled engineering
+proxy rather than inventing a supposedly exact e^N equation" when the
+literature's specific closed-form coefficients cannot be directly verified
+in-session. This module follows that path: it borrows the correct
+*qualitative* physics (an H-dependent neutral curve anchored at the sourced
+ZPG point; growth rate increasing with both `Re_theta` excess above that
+curve and with `H`, consistent with the well-documented destabilizing
+effect of adverse pressure gradient / higher shape factor) while being
+explicit that the specific functional forms and constants below are
+project choices, not digitized correlations.
+
+## 9. e^N derivation and sign convention (Milestone 2)
+
+**Sourced formalism (A):**
+
+```
+N = ln(A / A0)
+N(x) = integral_{x0}^{x} (-alpha_i(x')) dx'      [x0 = instability-onset station]
+```
+
+For a disturbance behaving spatially as `A(x) ~ exp(-integral alpha_i dx)`,
+unstable amplification corresponds to `alpha_i < 0`, i.e.
+`dN/dx = -alpha_i > 0`.
+
+**This module does not solve for `alpha_i`.** It works directly with a
+modeled `dN/ds` (`s = x/c`), as explicitly permitted by the assignment for
+a reduced-order proxy. This is stated plainly in `stability.py`'s module
+docstring and is not disguised as an eigenvalue solution.
+
+**Reduced-order proxy actually implemented (B):**
+
+```
+Re_theta,crit(H) = Re_theta,crit,ZPG * exp(-b * (H - H_blasius))     [project proxy shape,
+                                                                        anchored at sourced ZPG point]
+dN/ds             = k * (H - 1) * max(0, Re_theta - Re_theta,crit(H)) / Re_theta,crit,ZPG
+N(s)              = integral_0^s (dN/ds) ds'   [restricted to the M1-valid, attached-laminar domain]
+```
+
+with `Re_theta,crit,ZPG = 200` (sourced, Section 8 item 2), `H_blasius`
+the self-consistent Blasius `H` from `laminar_bl.py` (`~2.5916`), and
+`b = 1.0`, `k = 10.0` project (unsourced) calibration constants (Section
+10).
+
+**Project assumptions/calibration constants (C):**
+
+- `b = 1.0` (onset H-sensitivity): chosen so the resulting `Re_theta,crit(H)`
+  curve produces a modeled onset station comfortably between the leading
+  edge and the M1 laminar-separation station for the Milestone 1 baseline
+  operating point, and so that `Re_theta,crit` decreases monotonically and
+  smoothly as `H` rises through the adverse-gradient region. Not fit to any
+  published neutral-curve data.
+- `k = 10.0` (amplification-rate coefficient): chosen only so that the
+  Milestone 1 baseline case's accumulated `N` reaches an order-1-to-few
+  value (`N_max ~= 3.84`) by the M1 separation station -- legible on a
+  linear plot, and comfortably below commonly used `N_crit` values (~7-11)
+  reported in the e^N literature for various disturbance environments, so
+  that the honest result ("separation is reached with only modest N
+  accumulated") is visible rather than obscured. This constant is **not**
+  fit to any measured or computed amplification-rate data, and no attempt
+  was made to force it toward, or away from, any particular N_crit,
+  because no N_crit is selected in this milestone.
+
+**Quantities that would require a true Orr-Sommerfeld/PSE solver or a
+measured disturbance environment (D):**
+
+- The actual complex eigenvalue `alpha(x; omega, beta)` for each disturbance
+  frequency and spanwise wavenumber, computed from the true local
+  mean-velocity profile `U(y)` (not just its integral parameters `H`,
+  `Re_theta`).
+- A true `H`-and-`Re_theta`-parameterized neutral curve, computed (not
+  proxy-modeled) from Falkner-Skan or actual similarity/non-similarity
+  profile stability analysis.
+- The envelope construction over all disturbance frequencies (the
+  "most-amplified-frequency" envelope actually used by e^N codes in
+  practice), rather than a single scalar growth-rate proxy.
+- Any dependence on the actual disturbance/receptivity environment
+  (free-stream turbulence intensity and spectrum, surface roughness,
+  acoustic forcing) -- e^N in practice calibrates `N_crit` empirically
+  against this environment; this module makes no attempt to model
+  receptivity at all.
+
+## 10. Instability-onset criterion (Milestone 2)
+
+The onset criterion is exposed directly via `stability.critical_re_theta(H)`
+and `stability.is_unstable(Re_theta, H)`. A station is "modeled unstable"
+where the *local* `Re_theta(x)` (from the M1 Thwaites solution) first
+reaches or exceeds the *local* `Re_theta,crit(H(x))`. This is a "frozen"
+(quasi-parallel, locally evaluated) neutral-curve-crossing criterion --
+consistent in spirit with how e^N onset is located in practice (compare the
+local state against a neutral curve), but built on the project proxy of
+Section 9, not a true computed neutral curve.
+
+Favorable-gradient treatment: where `H < H_blasius` (favorable gradient,
+fuller profile), `Re_theta,crit(H) > 200` -- the proxy requires a higher
+local `Re_theta` before declaring instability, consistent with the
+well-documented stabilizing effect of favorable pressure gradient.
+
+Adverse-gradient treatment: where `H > H_blasius` (adverse gradient, less
+full / more inflectional profile), `Re_theta,crit(H) < 200` -- the proxy
+destabilizes (requires a lower `Re_theta`), consistent with the
+well-documented destabilizing effect of adverse pressure gradient /
+elevated shape factor.
+
+Near-separation treatment: as `H` rises sharply approaching the M1
+laminar-separation station, `Re_theta,crit(H)` continues to fall in this
+proxy (no floor is imposed) -- physically, real adverse-gradient/near-
+separation profiles are known to be strongly destabilized, so this
+qualitative direction is correct, but the module makes no claim that the
+*magnitude* of this destabilization is quantitatively accurate that close
+to separation (where the underlying attached-laminar Thwaites solution
+itself is also becoming less reliable; see Milestone 1 DESIGN.md Section
+7).
+
+Baseline result: modeled instability onset at `x/c ~= 0.0885`, well before
+the M1 laminar-separation diagnostic at `x/c ~= 0.4314`, giving an
+available amplification length of `Delta(x/c) ~= 0.343`. This is reported
+strictly as the **modeled instability onset**, never as a transition point,
+critical transition location, or laminar-run endpoint.
+
+## 11. Amplification-rate proxy and integration algorithm
+
+`dN/ds` (Section 9, formula B) is, by construction:
+
+- Exactly zero for `Re_theta < Re_theta,crit(H)` (stable stations
+  contribute nothing).
+- Continuous through the onset crossing: `max(0, ...)` clips smoothly to
+  zero as `Re_theta -> Re_theta,crit(H)^-`, so there is no artificial jump
+  in the integrand at onset (verified in
+  `test_local_amplification_rate_continuous_through_onset`).
+- Never negative (verified in
+  `test_local_amplification_rate_nonnegative_and_finite`).
+
+`N(s)` is computed by `integrate_n_factor()`, a **pure, aerodynamics-
+independent** cumulative-trapezoidal-quadrature utility
+(`scipy.integrate.cumulative_trapezoid`), tested directly against two
+analytic control cases (Section 12) before ever being combined with the
+aerodynamic proxy. Because `dN/ds` is already zero (not merely small) at
+every pre-onset station, integrating over the *entire* M1-valid domain from
+`s=0` automatically reproduces `N=0` up to the onset station -- no special-
+cased "start integrating at onset" logic is required, which is what avoids
+grid-dependent jumps at the onset crossing (see Section 13, grid
+convergence).
+
+## 12. Separation handling (Milestone 2)
+
+The valid domain for all Milestone 2 outputs is *exactly* the Milestone 1
+"reportable" domain (`~isnan(thwaites_sol.h)`), i.e. the pre-separation,
+Thwaites-lambda-in-range domain already established in Milestone 1.
+Outside that domain:
+
+- `Re_theta`, `Re_theta,crit`, `dN/ds`, and `N` are all set to `NaN`,
+  never fabricated or extrapolated (verified in
+  `test_no_amplification_accumulated_after_m1_separation`).
+- No amplification is accumulated beyond the M1 laminar-separation
+  diagnostic station, by construction (the cumulative integral is only
+  ever evaluated over the valid-domain index range).
+
+This directly satisfies the project requirement that the attached-laminar
+stability calculation stop/withhold at separation by default, with no
+silent extrapolation through the separated region.
+
+## 13. Numerical convergence (Milestone 2)
+
+Grid convergence is demonstrated (`test_grid_convergence_onset_nmax_and_
+separation`) by refining `n_points` from 251 to 4001 stations and checking
+that:
+
+- the modeled onset `x/c` converges (successive differences shrink,
+  finest-pair difference `< 2e-3` chord fraction),
+- the maximum accumulated `N` converges (finest-pair relative change
+  `< 0.5%`),
+- the M1 separation `x/c` (inherited from `solve_thwaites`) converges to
+  `< 1e-3` chord fraction, consistent with the Milestone 1 convergence
+  result.
+
+The continuity of `dN/ds` through the onset crossing (Section 11) is the
+key reason this convergence is well-behaved: there is no discontinuous
+"switch" in the integrand for the quadrature to resolve, only a smooth
+ramp from zero.
+
+## 14. Sensitivity study rationale
+
+The Milestone 2 sensitivity study (`scripts/en_amplification_study.py`,
+`figures/n_factor_reynolds_sensitivity.png`) varies `V_inf` at fixed
+geometry and fixed nondimensional `U_e(x/c)/V_inf` shape
+(`V_inf = 20, 25, 30 m/s`, giving `Re_c = 9.58e5, 1.198e6, 1.438e6`). Two
+results are reported honestly, including the one that might look like a
+bug but is not:
+
+- **The M1 laminar-separation `x/c` is (numerically) invariant across all
+  three cases** (`x/c ~= 0.4314` in every case, spread `< 1e-4`). This is
+  the expected Thwaites/Falkner-Skan similarity behavior for this
+  geometrically self-similar family: Thwaites' `lambda = (theta^2/nu)
+  dU_e/dx` is a purely local, Reynolds-number-free combination once `U_e`
+  is expressed as `V_inf * f(x/c)` for a *fixed* shape function `f` --
+  `theta^2` scales as `nu * c / V_inf` at fixed `x/c`, `dU_e/dx` scales as
+  `V_inf/c`, and the `nu`, `c`, `V_inf` dependence cancels exactly in
+  `lambda`. Since the Thwaites separation criterion is a fixed value of
+  `lambda`, it occurs at the same `x/c` regardless of `Re_c`, for this
+  family of cases. This is reported explicitly in the study script and in
+  the figure, not hidden.
+- **The modeled onset `x/c` and `N_max` DO vary with `Re_c`** (onset moves
+  earlier and `N_max` increases as `V_inf`/`Re_c` increases: onset
+  `x/c = 0.126, 0.089, 0.069` and `N_max = 2.89, 3.84, 4.75` for
+  `V_inf = 20, 25, 30 m/s`), because `Re_theta` itself is not
+  `Re_c`-invariant at fixed `x/c` (`Re_theta ~ sqrt(Re_c)` at fixed `x/c`
+  for this family), so higher `Re_c` reaches the (`Re_c`-independent)
+  onset criterion sooner in `x/c`, and accumulates more amplification
+  before the (also `Re_c`-independent in `x/c`) separation station.
+
+No case is described as "transitioned" anywhere in this output, because no
+`N_crit` has been selected.

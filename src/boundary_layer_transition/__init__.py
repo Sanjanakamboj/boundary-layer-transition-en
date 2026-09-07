@@ -1,6 +1,6 @@
-"""Milestone 1: laminar boundary-layer foundation and stability inputs.
+"""Laminar boundary-layer foundation and reduced-order e^N amplification tracking.
 
-This package establishes, for a single *generic* (non-manufacturer-matched)
+Milestone 1 established, for a single *generic* (non-manufacturer-matched)
 sailplane wing section:
 
 - a representative operating point (:mod:`operating_point`)
@@ -9,14 +9,20 @@ sailplane wing section:
 - zero-pressure-gradient (Blasius) and pressure-gradient-aware (Thwaites)
   laminar boundary-layer solutions (:mod:`laminar_bl`)
 
-Scope boundary: this milestone does NOT implement e^N amplification,
-transition prediction, N_crit selection, turbulent boundary-layer or drag
-modeling. A predicted laminar-separation location is a laminar-boundary-layer
-diagnostic only and must not be interpreted as a transition location.
+Milestone 2 extends this with a transparent, source-audited, reduced-order
+linear-stability proxy and e^N amplification-factor tracking
+(:mod:`stability`), built on the Milestone 1 Thwaites solution.
+
+Scope boundary (both milestones): no N_crit is selected, no transition
+location is predicted, and no turbulent boundary-layer or drag modeling is
+performed. A Thwaites-predicted laminar-separation location is a
+laminar-boundary-layer diagnostic only, and a modeled instability onset or
+accumulated N-factor is an amplification-tracking result only -- neither is
+a transition prediction.
 """
 
-from . import external_flow, laminar_bl, operating_point
+from . import external_flow, laminar_bl, operating_point, stability
 
-__all__ = ["external_flow", "laminar_bl", "operating_point"]
+__all__ = ["external_flow", "laminar_bl", "operating_point", "stability"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

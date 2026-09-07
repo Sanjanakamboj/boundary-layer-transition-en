@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boundary-layer-transition"
-version = "0.1.0"
-description = "Milestone 1: laminar boundary-layer foundation and stability inputs for a generic sailplane wing section (e^N transition project)."
+version = "0.2.0"
+description = "Laminar boundary-layer foundation and reduced-order e^N amplification tracking for a generic sailplane wing section."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
