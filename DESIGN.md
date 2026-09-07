@@ -876,3 +876,263 @@ genuinely precedes transition physically (rather than the simple
 "assumed immediate transition" bookkeeping used here), and (c)
 form/pressure drag and viscous-inviscid interaction effects, none of
 which are modeled in this project.
+
+---
+
+# MILESTONE 4: Pressure-Gradient Turbulent Boundary Layer and Transition-to-TE Drag
+
+**Scope reminder:** Milestone 4 replaces Milestone 3's zero-pressure-
+gradient flat-plate turbulent bookkeeping, downstream of an assumed
+transition station, with an actual pressure-gradient turbulent integral
+boundary-layer solution (Head's entrainment method). It does not alter
+the M1 laminar solution, the M2 amplification proxy, or the M3
+transition-event logic. It does not fit any constant to produce a
+predetermined drag result, and does not claim CFD- or experimental-level
+validation.
+
+## 24. Source audit (turbulent integral method)
+
+Sources actually checked in this session (via live web search/fetch):
+
+1. **Head, M. R.** (1958), "Entrainment in the Turbulent Boundary Layer,"
+   ARC R&M 3152. Confirmed via web search (a Stanford-hosted copy of this
+   report was found in search results) as the origin of the entrainment
+   concept and the ``H1`` entrainment shape parameter. This project's
+   implementation follows the widely reproduced Green-Weeks-Brooman
+   curve-fit to Head's data (item 2 below), not a direct re-digitization
+   of Head's own original tables.
+
+2. **Green, J. E., Weeks, D. J., and Brooman, J. W. F.** (1973), RAE TR
+   72231. Web search located multiple independent secondary summaries
+   attributing the specific ``H1(H)`` polynomial-power-law fit and the
+   ``F(H1) = 0.0299 (H1-3)^-0.6169`` entrainment closure to this report.
+   The exact equation set and constants used in this module were
+   **directly fetched and quoted** from a peer-reviewed journal article
+   (Cambridge Core, *Flow* journal, "An extension of Thwaites' method for
+   turbulent boundary layers") that reproduces them, giving:
+   - Momentum integral: `dtheta/ds + (2+H)(theta/Ue)(dUe/ds) = Cf/2`
+   - Entrainment: `(1/Ue) d/ds(Ue theta H1) = 0.0299 (H1-3.0)^-0.6169`
+   - `H1(H)`: `H1 = 0.8234(H-1.1)^-1.287 for H<=1.6`, `H1 =
+     1.55(H-0.6778)^-3.064 + 3.3` otherwise.
+
+   **Correction applied and documented**: the fetched quote's low-H
+   branch of the `H1(H)` correlation did not show the `+3.3` additive
+   offset that the high-H branch has. A direct continuity check at the
+   branch boundary `H=1.6` (computed in this session) shows the two
+   branches agree to within ~0.4% **only** when the same `+3.3` offset is
+   applied to both (`5.309` vs. `5.287`, vs. `2.009` vs. `5.287` without
+   it -- a ~2.6x discontinuity). This module therefore applies `+3.3` to
+   both branches, documented here as a correction derived from an
+   in-session verification, not blindly copied from either secondary
+   source.
+
+3. **Ludwieg, H., and Tillmann, W.** (1950), "Investigations of the Wall
+   Shearing Stress in Turbulent Boundary Layers," NACA TM 1285 (English
+   translation of the original German report). Confirmed via the same
+   peer-reviewed source (item 2) and independently cross-referenced via
+   web search: `Cf = 0.246 * 10^(-0.678 H) * Re_theta^(-0.268)`.
+
+**What was not independently verified**: Head's own original 1958
+tabulated `H1(H)` data (only the Green-Weeks-Brooman curve fit to it was
+verified); any compressible-flow extension of the method (Green, Weeks &
+Brooman also published a compressible/lag-entrainment variant, found in
+search results but not used here since this project is incompressible
+throughout); Alber's or other alternative turbulent-separation criteria
+(mentioned in the same peer-reviewed source as an alternative, not used
+here since this project uses the entrainment correlation's own asymptotic
+limit instead -- see Section 26).
+
+## 25. Governing equations and closures implemented
+
+```
+Momentum integral:    dtheta/dx + (2+H)(theta/Ue)(dUe/dx) = Cf/2
+Entrainment:          (1/Ue) d(Ue theta H1)/dx = F(H1)
+                       F(H1) = 0.0299 (H1 - 3.0)^-0.6169
+H1(H) correlation:    H1 = 0.8234(H-1.1)^-1.287 + 3.3          (H <= 1.6)
+                       H1 = 1.55(H-0.6778)^-3.064 + 3.3         (H  > 1.6)
+H(H1):                numerical inverse of the (globally monotonic,
+                       verified in-session over H in (1.1, 8]) H1(H) map
+Skin friction:        Cf = 0.246 * 10^(-0.678 H) * Re_theta^-0.268
+```
+
+The entrainment equation is expanded via the product rule to the
+integrated state-derivative form actually implemented:
+
+```
+dH1/dx = [F(H1) - (theta H1/Ue) dUe/dx - H1 dtheta/dx] / theta
+```
+
+`Re_theta = Ue theta / nu` reuses `stability.reynolds_theta` (with
+`rho=1`, `mu=nu`, an algebraic identity, not a new formula).
+`delta* = H * theta` (the shape-factor definition, consistent with
+Milestone 1's convention).
+
+## 26. Turbulent separation / validity criterion
+
+The `H1(H)` correlation's high-H branch asymptotes to `H1 -> 3.3` only as
+`H -> infinity`; this is the correlation's own built-in separation limit
+(a standard interpretation of Head's method, cross-confirmed by the
+asymptotic value 3.3 matching the additive offset in both branches).
+`turbulent_bl.py` declares **turbulent separation** via a terminal
+`scipy.integrate.solve_ivp` event when the integrated `H1(x)` state
+crosses down through `H1_SEPARATION_THRESHOLD = 3.32` -- a small,
+documented numerical margin above the exact 3.3 asymptote (needed because
+3.3 is reached only in the limit `H -> infinity`, and the `H(H1)`
+numerical inversion becomes ill-conditioned arbitrarily close to it). This
+is **not** inferred from "Cf became small" as an ad hoc rule -- Cf does
+happen to become very small near this point (a real consequence of `Cf ~
+10^(-0.678 H)` and `H` growing rapidly there), but the actual trigger is
+the `H1` state variable's own domain limit.
+
+Two further terminal events guard against non-physical states without
+ever silently clipping them: `theta <= 1e-12` (near-zero/negative momentum
+thickness -> `INVALID_CLOSURE`) and `H > H_MAX_VALID = 15` (a safety net;
+in practice never reached before the `H1` separation event fires, since
+`H1(H=15) ~= 3.3004`, already below the 3.32 threshold). A caught
+exception from `solve_ivp` itself, or a non-success return without a
+terminal event, is reported as `INTEGRATION_FAILURE`. All four outcomes
+(`COMPLETED_TO_TE`, `TURBULENT_SEPARATION`, `INVALID_CLOSURE`,
+`INTEGRATION_FAILURE`) are explicit `TurbulentBLStatus` enum values, never
+inferred from NaN patterns alone.
+
+**RHS robustness note**: the adaptive ODE integrator routinely *probes*
+trial states slightly beyond the closure's valid domain while selecting
+step sizes, even when the accepted trajectory itself remains valid until
+an event actually fires. The right-hand-side function defensively clamps
+its *internal* evaluation (never the reported/stored state) and catches
+domain exceptions from such probes, returning a neutral (zero) derivative
+for that probe only; the terminal events, which read the true unclamped
+state at each accepted step, remain the sole authority for classifying
+separation or invalidity. This was necessary in practice -- an early,
+unguarded implementation raised uncaught exceptions from transient
+negative-`theta` probes under a strong favorable gradient, discovered via
+the favorable-gradient control test in `tests/test_turbulent_bl.py`.
+
+## 27. Transition initialization
+
+See `turbulent_bl.transition_initial_state()` and the module docstring for
+the full logic. Two cases:
+
+1. **Transition at or before the M1 laminar-separation diagnostic**
+   (covers the separation-triggered scenario and all prescribed
+   early/mid/late cases used in this milestone, `x_tr/c <= x_sep/c`):
+   `theta_tr` is linearly interpolated from the M1 Thwaites `theta_m(x)`
+   array at `x_tr` (a continuous handoff of the one state variable that
+   remains well-defined in the raw M1 array even past the point where M1
+   itself considers `H`/`Cf` invalid). Attempting to initialize beyond
+   `x_sep` is explicitly rejected (`ValueError`) -- this module never uses
+   the M1 laminar state beyond where M1 itself considers it valid.
+2. **"Fully turbulent from the leading edge"** (`x_tr = 0`): there is no
+   laminar `theta` to hand off. `theta` is seeded at a small offset
+   station (`1e-4` chord, analogous to `skin_friction.build_drag_grid`'s
+   `s_min`) using `theta = 0.037 x Re_x^-0.2` -- **derived** in this
+   session (not an independent citation) by integrating the momentum
+   equation at zero pressure gradient with `Cf,x = 0.0592 Re_x^-0.2`
+   (Milestone 3's own turbulent flat-plate correlation) under a
+   constant-`H` assumption. This keeps the M3 flat-plate idealization and
+   the M4 integral method's leading-edge start mutually consistent,
+   without claiming it as sourced literature.
+
+**Initial shape factor, `H_TR_NOMINAL = 72/56 ~= 1.286`**: the exact
+shape factor of the 1/7-power-law turbulent velocity profile
+(`delta*=delta/8`, `theta=7 delta/72`), the same idealized profile family
+underlying the Milestone 3 turbulent flat-plate correlations. This is used
+as a documented, physically motivated nominal *initial condition* only --
+**an important finding from this session's own verification** (see
+`test_zpg_equilibrium_independent_of_initial_h`) is that Head's full
+two-equation system does **not** hold `H` fixed at this value; started
+from `H=1.286` under zero pressure gradient, `H` first *rises* toward a
+higher local self-similar-equilibrium value (`H~=1.43` at `x=0.5` m for a
+`V=25` m/s reference case) before slowly declining further downstream
+(`H~=1.35` at `x=5` m) -- consistent with the well-documented real
+behavior of ZPG turbulent boundary layers (a young, fuller post-
+transition profile relaxing toward, then slowly evolving along, a
+self-similar downstream state), and independent of the exact starting
+`H_tr` once integrated far enough (verified directly: `H_tr` in
+`{1.286, 1.5, 1.7}` converge to the same `H(x=3 m)` to `<1e-3`). `H_tr`'s
+practical influence on this project's short-chord (`0.7 m`) cases is
+correspondingly modest but not negligible (Section 10 sensitivity: `C_d,f`
+varies over roughly a 1.28x range across `H_tr` in `[1.2, 1.6]` at the
+baseline separation-triggered station).
+
+## 28. Event/scenario hierarchy and distinctions (extended from Milestone 3)
+
+| Concept | Where computed | Meaning |
+|---|---|---|
+| Modeled instability onset | M2 `stability.py` | First unstable station; N starts accumulating |
+| e^N / N_crit crossing | M3 `transition.py` | N(x) reaches an externally supplied N_crit, within the M1 valid domain |
+| M1 laminar-separation diagnostic | M1 `laminar_bl.py` | Thwaites `l(lambda)=0`; not transition |
+| Separation-triggered transition (bookkeeping) | M3 `transition.py` | Assumed immediate transition at the M1 separation station |
+| **Turbulent separation** (new, M4) | M4 `turbulent_bl.py` | Head's-method `H1` state reaches its own asymptotic limit; the *turbulent* boundary layer's own separation, wholly distinct from the upstream *laminar* separation diagnostic |
+
+A case can (and, for every scenario examined at the Milestone 1 baseline
+operating point, *does*) exhibit **both** a laminar-separation diagnostic
+*and*, after an assumed turbulent restart there, a **separate, downstream
+turbulent separation** -- these are two different events from two
+different models and must never be conflated.
+
+## 29. Drag integration and the M3/M4 comparison
+
+`turbulent_bl.pressure_gradient_cf_distribution()` builds the M4 analogue
+of `skin_friction.transitioned_cf_distribution()`: laminar Blasius before
+`x_tr`, and the Head's-method `Cf(x)` (interpolated from the ODE solution)
+from `x_tr` onward. Where the turbulent solution does not reach the
+trailing edge (`TURBULENT_SEPARATION` or `INVALID_CLOSURE`), `Cf` is held
+constant at its last valid value for the remaining chord -- an explicit,
+documented bookkeeping convention (exactly `numpy.interp`'s default
+constant-extrapolation behavior applied to the valid prefix), **not** a
+resolved separated-flow solution and **not** inclusive of any associated
+pressure-drag rise. The same `skin_friction.section_cf_drag()` two-
+surface, dynamic-pressure-weighted integral (Milestone 3, Section 19) is
+reused unchanged for both the M3 and M4 `Cf(x)` distributions, so the
+comparison isolates exactly the difference in the downstream turbulent
+`Cf(x)` model.
+
+**Result and interpretation (see README.md for the full numeric table):**
+M4 gives **lower** `C_d,f` than M3 in every scenario examined in this
+project (roughly 16-24% lower). This is a genuine, unforced finding,
+explained as follows: M3's flat-plate correlation is evaluated at a
+Reynolds number based on the *physical distance from the real leading
+edge* and the *freestream* velocity, with no memory of the boundary
+layer's actual accumulated momentum thickness -- it always predicts a
+"fresh," relatively high-`Cf` turbulent layer at a given `x`. M4's
+integral solution, by contrast, correctly inherits whatever momentum
+thickness the flow actually has at transition (here, an already
+laminar-separation-thickened value) and further reflects the real,
+sourced trend that `Cf` collapses toward zero as the turbulent layer
+itself approaches separation (`Cf ~ 10^(-0.678 H)`, and `H` grows sharply
+there) -- both effects push the M4-integrated `Cf` below M3's flat-plate
+value over most of the post-transition region. This direction is **not**
+guaranteed in general (a different, milder pressure-gradient case, or a
+transition far upstream with a long attached turbulent run, could show
+the opposite), and is reported here exactly as observed, per the explicit
+project instruction not to assume a particular sign.
+
+## 30. Numerical method and convergence
+
+`scipy.integrate.solve_ivp` with `method="LSODA"` (chosen for robustness
+near the entrainment closure's increasingly stiff behavior as `H1`
+approaches its 3.3 asymptote; `RK45` was tried first and found adequate
+away from separation but LSODA was kept throughout for uniformity and its
+automatic stiffness handling). Tolerances (`rtol`, `atol`) are exposed as
+parameters; convergence of the turbulent-separation location under
+tolerance refinement (`1e-6 -> 1e-8 -> 1e-10`) is verified directly
+(`test_tolerance_convergence_separation_location`): the location is
+stable to `<2 micrometers` across four decades of tolerance for the
+baseline case. The reporting grid density (`n_report`, dense-output
+re-sampling only, independent of the adaptive internal step size) is
+verified not to change the classified status
+(`test_report_grid_density_does_not_change_status`).
+
+## 31. Distinction: this milestone's turbulent model is still not a full solution
+
+A true field/RANS turbulent boundary-layer solution, or even a more
+complete integral method, would additionally require: (a) validated
+handling of the actual separated-flow region beyond the Head's-method
+turbulent-separation event (this project freezes `Cf`, an explicit
+bookkeeping placeholder, not a resolved solution); (b) a real
+laminar-separation-bubble transition/reattachment model, rather than the
+"instantaneous restart" assumption, for cases where the true physical
+transition mechanism is bubble-mediated; (c) compressibility, 3D, and
+form/pressure-drag effects, none of which are modeled anywhere in this
+project.

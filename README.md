@@ -3,6 +3,7 @@
 **Milestone 1: Laminar Boundary-Layer Foundation and Stability Inputs**
 **Milestone 2: Reduced-Order Linear-Stability Proxy and e^N Amplification Tracking**
 **Milestone 3: N_crit Transition Criterion, Turbulent Skin Friction, and Drag Impact**
+**Milestone 4: Pressure-Gradient Turbulent Boundary Layer and Transition-to-TE Drag**
 
 ## Engineering objective
 
@@ -450,12 +451,176 @@ python3 scripts/generate_m3_figures.py
 - Form drag, pressure drag, or 3D/finite-span effects.
 - Any claim of experimental validation.
 
-## Recommended Milestone 4 topic (not started)
+---
 
-Extend the turbulent boundary-layer treatment beyond the flat-plate
-bookkeeping approximation (e.g. a Head's-method or Cebeci-Smith momentum-
-integral turbulent boundary layer driven by the actual M1 `U_e(x)`
-pressure gradient), and/or introduce a simple form-drag / pressure-drag
-estimate to move from a skin-friction-only `C_d,f` toward a more complete
-section drag polar -- with sourced turbulent closure constants audited the
-same way `N_crit` was audited here.
+## Milestone 4: pressure-gradient turbulent boundary layer and transition-to-TE drag
+
+### Why beyond flat-plate bookkeeping
+
+Milestone 3's turbulent skin friction used a zero-pressure-gradient flat-
+plate correlation evaluated at the physical distance from the leading
+edge -- convenient, but blind to (a) the actual momentum thickness the
+flow has already accumulated by the assumed transition station and (b)
+the real pressure gradient acting on the turbulent layer downstream.
+Milestone 4 replaces that with an actual two-equation turbulent integral
+boundary-layer method (Head's entrainment method) propagated along the
+real Milestone 1 `U_e(x)`, connecting the full pipeline: M1 external flow
++ laminar Thwaites -> M2 e^N amplification -> M3 transition-event logic ->
+M4 turbulent propagation -> improved skin-friction drag estimate.
+
+### Chosen method and sources
+
+**Head's entrainment method** (Head, M. R., 1958, ARC R&M 3152), using the
+Green-Weeks-Brooman (RAE TR 72231, 1973) curve fit for the entrainment
+closure and `H1(H)` correlation, and the Ludwieg-Tillmann (1950, NACA TM
+1285) skin-friction correlation. The exact equation set and constants were
+fetched and verified from a peer-reviewed source (Cambridge Core, *Flow*
+journal) in this session; a small correction (a missing `+3.3` offset on
+one branch of a secondary source's quoted `H1(H)` formula) was identified
+and applied via a direct continuity cross-check -- see DESIGN.md Section
+24 for the full audit.
+
+```
+Momentum integral:  dtheta/dx + (2+H)(theta/Ue)(dUe/dx) = Cf/2
+Entrainment:         (1/Ue) d(Ue theta H1)/dx = 0.0299 (H1-3.0)^-0.6169
+H1(H):                0.8234(H-1.1)^-1.287 + 3.3   (H<=1.6)
+                      1.55(H-0.6778)^-3.064 + 3.3   (H>1.6)
+Skin friction:       Cf = 0.246 * 10^(-0.678 H) * Re_theta^-0.268
+```
+
+### State variables
+
+`theta(x)`, entrainment shape factor `H1(x)` (the two integrated ODE
+states), with `H(x)` (via numerical inversion of `H1(H)`),
+`delta*(x) = H*theta`, and `Cf(x)` (Ludwieg-Tillmann) derived at each
+station.
+
+### Transition initialization
+
+`theta_tr` is taken by continuous interpolation of the M1 laminar
+`theta(x)` at the assumed transition station (rejected if that station
+lies beyond the M1 laminar-separation diagnostic -- the M1 laminar state
+is never used where M1 itself considers it invalid). The initial shape
+factor uses `H_tr = 72/56 ~= 1.286`, the exact 1/7-power-law turbulent
+profile value (the same idealized profile underlying Milestone 3's
+turbulent flat-plate correlations) -- a documented nominal choice, with
+its sensitivity explicitly quantified (see below), not fit to produce any
+particular drag result.
+
+### Turbulent separation criterion
+
+The `H1(H)` correlation's own asymptote (`H1 -> 3.3` as `H -> infinity`)
+is used directly: this project declares turbulent separation when the
+integrated `H1` state crosses down through `3.32` (a small, documented
+numerical margin above that asymptote), via a terminal ODE event -- not
+inferred from "Cf got small."
+
+### Baseline result
+
+Propagating the turbulent boundary layer from the Milestone 3
+separation-triggered station (`x_tr/c = 0.4314`, `theta_tr = 0.240 mm`,
+`H_tr = 1.286`):
+
+- **The turbulent boundary layer itself separates** at `x/c ~= 0.785`
+  (`H` has risen to `~4.4` there) -- **it does not reach the trailing
+  edge**. This is an honest, unforced finding: this project's synthetic
+  adverse-gradient `U_e(x/c)` (a 53% deceleration from its peak to the
+  trailing edge) is severe enough that essentially every transition
+  scenario examined leads to turbulent separation before the trailing
+  edge, regardless of where transition is assumed to occur.
+
+### M3 vs. M4 skin-friction drag comparison
+
+| Scenario | `x_tr/c` | M3 `C_d,f` | M4 `C_d,f` | % difference | M4 status |
+|---|---|---|---|---|---|
+| Fully turbulent | 0.00 | 0.008730 | 0.006611 | -24.3% | turbulent separation |
+| Early prescribed | 0.10 | 0.008048 | 0.006441 | -20.0% | turbulent separation |
+| Late prescribed | 0.40 | 0.005330 | 0.004350 | -18.4% | turbulent separation |
+| Separation-triggered | 0.4314 | 0.005044 | 0.004144 | -17.8% | turbulent separation |
+| N_crit=9 crossing (V=60 m/s) | 0.4282 | 0.003904 | 0.003265 | -16.4% | turbulent separation |
+
+**M4 consistently gives *less* drag than M3 in every scenario examined**
+(16-24% lower). This is reported and explained, not assumed: M3's
+flat-plate correlation, referenced to the freestream velocity and the
+physical distance from the leading edge, has no memory of the actual
+(already-thickened) momentum deficit at transition and always predicts a
+"fresh" turbulent layer; M4's integral solution correctly inherits that
+thickened state and additionally reflects the real, sourced collapse of
+`Cf` toward zero as the turbulent layer itself approaches separation. This
+direction is not asserted as a general rule -- a milder pressure gradient
+or an earlier, longer attached turbulent run could reverse it.
+
+### Reynolds sensitivity
+
+Every `V_inf` case examined (20-90 m/s, `Re_c` from 9.6e5 to 4.3e6) also
+reaches turbulent separation from the separation-triggered station, at a
+gently increasing `x/c` (~0.78 to ~0.83) as `Re_c` rises; `C_d,f` decreases
+monotonically with `Re_c` (0.00443 at 20 m/s to 0.00293 at 90 m/s),
+consistent with the usual Reynolds-number scaling of skin friction.
+
+### Initialization (`H_tr`) sensitivity
+
+| `H_tr` | Status | `C_d,f` |
+|---|---|---|
+| 1.20 | turbulent separation | 0.004705 |
+| 1.286 (nominal) | turbulent separation | 0.004144 |
+| 1.40 | turbulent separation | 0.003862 |
+| 1.60 | turbulent separation | 0.003687 |
+
+A modest (~1.28x) but non-negligible sensitivity -- quantified explicitly,
+not hidden, and consistent with the finding (Section 27, DESIGN.md) that
+Head's system relaxes toward a common downstream equilibrium largely
+independent of the exact starting `H_tr`, over a longer development length
+than this project's short chord provides.
+
+### Reproduce Milestone 4
+
+```bash
+python3 scripts/turbulent_boundary_layer_study.py
+python3 scripts/generate_m4_figures.py
+```
+
+### Milestone 4 figures
+
+| File | Content |
+|---|---|
+| `figures/turbulent_boundary_layer_history.png` | `theta/c`, `H`, `Cf` vs. `x/c` for the separation-triggered case, with transition and turbulent separation marked |
+| `figures/m3_vs_m4_skin_friction.png` | Local `Cf(x)` comparing M3 flat-plate vs. M4 pressure-gradient turbulent treatment (laminar portions coincide) |
+| `figures/m3_vs_m4_drag_impact.png` | `C_d,f` vs. assumed `x_tr/c` for both models, with laminar/turbulent references and the separation-triggered case marked |
+| `figures/turbulent_reynolds_sensitivity.png` | `C_d,f` and turbulent-separation `x/c` vs. `Re_c` |
+
+### Limitations
+
+- Head's method is a classical reduced-order integral method, not a
+  field/RANS/CFD solution, and is not validated against experimental data
+  in this project.
+- Beyond a Milestone-4-predicted turbulent separation, `Cf` is held
+  constant (frozen) as a bookkeeping convention -- this is not a resolved
+  separated-flow solution and excludes any associated pressure-drag rise.
+- The "instantaneous laminar-to-turbulent restart" transition
+  initialization does not resolve an actual laminar-separation bubble.
+- No compressibility, 3D, or form/pressure-drag effects are modeled.
+- The turbulent-origin treatment for the "fully turbulent from the
+  leading edge" seed uses a self-derived (not independently sourced)
+  flat-plate `theta` scaling consistent with Milestone 3's own turbulent
+  correlation.
+
+## What Milestone 4 does NOT model
+
+- A resolved separated-flow (post-turbulent-separation) solution.
+- A laminar-separation-bubble transition/reattachment model.
+- Compressible, 3D, or form/pressure-drag effects.
+- Any claim of CFD or experimental validation.
+
+## Recommended Milestone 5 topic (not started)
+
+Milestone 4 found that this project's synthetic adverse gradient drives
+the turbulent boundary layer to separation before the trailing edge in
+every scenario examined. A natural next step is a sourced, reduced-order
+treatment of the post-separation region -- e.g. a documented pressure-
+drag/form-drag estimate for the separated region (rather than the current
+frozen-`Cf` bookkeeping placeholder), and/or a simple, sourced
+laminar-separation-bubble transition model to replace the "instantaneous
+restart" assumption -- to move from a skin-friction-only `C_d,f` toward a
+more complete section drag polar, with any new closure constants audited
+the same way `N_crit` and Head's-method constants were audited here.
