@@ -43,6 +43,16 @@ distinct, separately labeled separated pressure/form-drag bookkeeping term
 alongside the skin-friction contribution over only the modeled attached/
 reattached surface regions (:mod:`separated_drag`).
 
+Milestone 6 (final) is a deterministic robustness audit and portfolio
+synthesis. It introduces no new physics: it constructs a small, fixed
+family of external-flow shape perturbations around the Milestone 1
+baseline (:mod:`external_flow_sensitivity`) and re-propagates each one
+through the unmodified M1-M5 chain (:mod:`robustness`) to quantify how
+much of the baseline's separation/transition/drag story depends on the
+specific illustrative pressure distribution chosen in Milestone 1, versus
+more general Reynolds-number/boundary-layer behavior. See RESULTS.md,
+VERIFICATION.md, and DESIGN.md Section 41 for the final findings.
+
 Scope boundary: N_crit is an external, environment-dependent input, never
 selected or recommended by this project (see DESIGN.md for the sourced
 sensitivity range used in the study scripts). A Thwaites-predicted
@@ -52,16 +62,18 @@ tracking result only, an e^N N_crit crossing, the Milestone 3 separation-
 triggered bookkeeping scenario, and the Milestone 5 separation-bubble
 closure are three explicitly distinct transition assumptions, a Milestone
 5 turbulent (re)separation is distinct from the Milestone 1 laminar
-separation, and no turbulent, bubble, or drag result in this project is,
-or substitutes for, a CFD/RANS solution, an experimentally validated
-transition or drag prediction, a stall angle, a "safe" operating envelope,
-or a complete/certified airfoil drag polar.
+separation, and no turbulent, bubble, drag, or sensitivity result in this
+project is, or substitutes for, a CFD/RANS/XFOIL/experimental solution or
+validation, a stall angle, a "safe" operating envelope, or a
+complete/certified airfoil drag polar. Development stops after Milestone 6.
 """
 
 from . import (
     external_flow,
+    external_flow_sensitivity,
     laminar_bl,
     operating_point,
+    robustness,
     separated_drag,
     separation_bubble,
     skin_friction,
@@ -72,8 +84,10 @@ from . import (
 
 __all__ = [
     "external_flow",
+    "external_flow_sensitivity",
     "laminar_bl",
     "operating_point",
+    "robustness",
     "separated_drag",
     "separation_bubble",
     "skin_friction",
@@ -82,4 +96,4 @@ __all__ = [
     "turbulent_bl",
 ]
 
-__version__ = "0.5.0"
+__version__ = "1.0.0"
