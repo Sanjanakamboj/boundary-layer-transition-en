@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "boundary-layer-transition"
-version = "0.2.0"
-description = "Laminar boundary-layer foundation and reduced-order e^N amplification tracking for a generic sailplane wing section."
+version = "0.3.0"
+description = "Laminar boundary-layer foundation, e^N amplification tracking, and N_crit transition / skin-friction drag bookkeeping for a generic sailplane wing section."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

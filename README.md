@@ -2,6 +2,7 @@
 
 **Milestone 1: Laminar Boundary-Layer Foundation and Stability Inputs**
 **Milestone 2: Reduced-Order Linear-Stability Proxy and e^N Amplification Tracking**
+**Milestone 3: N_crit Transition Criterion, Turbulent Skin Friction, and Drag Impact**
 
 ## Engineering objective
 
@@ -249,14 +250,212 @@ python3 scripts/generate_m2_figures.py
   amplification correlation.
 - Receptivity / disturbance-environment modeling.
 
-## Recommended Milestone 3 topic (not started)
+---
 
-Given a chosen, documented `N_crit` (with its own source audit -- e.g.
-typical wind-tunnel `N_crit ~= 8-9`, typical free-flight/low-turbulence
-`N_crit ~= 11-12`, per the e^N literature), locate the transition station
-as the first `x/c` where the Milestone 2 `N(x/c)` curve reaches `N_crit`
-(honestly reporting if the Milestone 2 baseline case reaches laminar
-separation before any plausible `N_crit`, in which case transition would be
-associated with separation rather than the smooth `N`-envelope crossing),
-and begin turbulent boundary-layer / skin-friction modeling downstream of
-that station.
+## Milestone 3: N_crit transition criterion, turbulent skin friction, and drag impact
+
+### Objective
+
+Extend Milestone 2 into an actual (sensitivity-range) transition-location
+estimate and its first-order skin-friction drag consequence: select a
+defensible `N_crit` sensitivity range from primary literature, locate
+where (if anywhere) the Milestone 2 `N(x)` curve reaches it, introduce a
+separate "assumed transition at separation" bookkeeping scenario for cases
+where no crossing exists, add sourced laminar/turbulent flat-plate
+skin-friction correlations, and estimate the resulting section
+skin-friction drag coefficient.
+
+### What N_crit means
+
+`N_crit` is **not a universal material constant** -- it is an
+environment/receptivity-dependent threshold: the amplification level at
+which small disturbances typically become large enough, given the actual
+disturbance environment (free-stream turbulence, acoustics, surface
+roughness), to trigger transition. A lower `N_crit` corresponds to a
+noisier environment; a higher `N_crit` to a quieter one. This project does
+not model receptivity explicitly and does not invent a turbulence-
+intensity-to-`N_crit` mapping.
+
+### Sourced N_crit sensitivity range
+
+Fetched and quoted verbatim from Mark Drela's primary XFOIL documentation
+(`web.mit.edu/drela/Public/web/xfoil/xfoil_doc.txt`) in this session:
+
+| Situation | `N_crit` |
+|---|---|
+| Sailplane | 12-14 |
+| Motorglider | 11-13 |
+| Clean wind tunnel | 10-12 |
+| Average wind tunnel | 9 (standard "e^9 method") |
+| Dirty wind tunnel | 4-8 |
+
+This project uses **`N_crit` in {9, 12, 14}** as its sensitivity range:
+9 (the historical "e^9" average-wind-tunnel reference) and 12/14 (the
+documented sailplane range -- directly relevant to this project's vehicle
+type). This is a sensitivity range, not a selected or recommended design
+value.
+
+### Exact transition-event/status logic
+
+`transition.locate_transition_n_crit(asol, n_crit)` returns exactly one of:
+
+- **`N_CRIT_CROSSING`**: `N(x)` reaches `N_crit` within the Milestone 1
+  valid (attached-laminar) domain; the crossing `x_tr/c` is linearly
+  interpolated between grid stations.
+- **`SEPARATION_BEFORE_N_CRIT`**: the M1 laminar-separation diagnostic
+  occurs first.
+- **`NO_EVENT_IN_DOMAIN`**: neither occurs (only arises for hypothetical
+  cases with no predicted separation and insufficient amplification).
+
+Separately, `transition.separation_triggered_transition(asol)` builds an
+explicitly labeled **"separation-triggered" bookkeeping scenario**
+(`x_tr = x_sep`) -- used for drag estimation only when no N_crit crossing
+exists. **This is never an e^N result and is never presented as one.**
+
+### Baseline outcome
+
+At the Milestone 1/2 baseline operating point (`Re_c ~= 1.198e6`),
+`N_max ~= 3.84`, well below every sourced `N_crit` value. The correct,
+honestly reported result for all three (`N_crit = 9, 12, 14`) is:
+
+**`SEPARATION_BEFORE_N_CRIT`** -- the modeled laminar boundary layer
+reaches its Thwaites separation diagnostic (`x/c ~= 0.4314`) before enough
+amplification has accumulated to cross any plausible `N_crit`. No
+crossing is invented to force a transition-location result.
+
+### Reynolds-number sensitivity
+
+The existing physical sensitivity space (`V_inf`, hence `Re_c`) was
+searched -- **not the M2 amplification-rate proxy constants** -- for a
+naturally occurring `N_crit` crossing, extended up to `V_inf = 90` m/s
+(`M ~= 0.26`, still comfortably within the M1 incompressible assumption,
+`M < 0.3`):
+
+| `V_inf` [m/s] | `Re_c` | `N_max` | `N_crit=9` | `N_crit=12` | `N_crit=14` |
+|---|---|---|---|---|---|
+| 20 | 9.58e5 | 2.89 | separation first | separation first | separation first |
+| 25 | 1.198e6 | 3.84 | separation first | separation first | separation first |
+| 30 | 1.438e6 | 4.75 | separation first | separation first | separation first |
+| 40 | 1.917e6 | 6.40 | separation first | separation first | separation first |
+| **60** | 2.875e6 | 9.25 | **crossing at x/c=0.428** | separation first | separation first |
+| **90** | 4.313e6 | 12.78 | **crossing at x/c=0.378** | **crossing at x/c=0.423** | separation first |
+
+Two genuine `N_crit` crossings were found this way (`V_inf = 60` m/s
+crosses `N_crit=9`; `V_inf = 90` m/s crosses both `N_crit=9` and `12`),
+without altering any Milestone 2 amplification-model constant.
+
+### Separation-triggered assumption
+
+Because the transition location cannot be determined by e^N crossing for
+the baseline case, Milestone 3's drag bookkeeping falls back to the
+explicitly labeled "assumed immediate transition at the M1
+laminar-separation diagnostic" scenario (`x_tr/c = x_sep/c ~= 0.4314`).
+This is a modeling convenience -- not a claim that separation equals
+transition physically.
+
+### Skin-friction correlations
+
+- Laminar, local (reused from Milestone 1): `Cf,x = 0.664 / sqrt(Re_x)`
+  (Blasius).
+- Laminar, average: `Cf_bar = 1.328 / sqrt(Re_L)`.
+- Turbulent, local: `Cf,x = 0.0592 * Re_x^(-1/5)` (smooth-wall,
+  incompressible, zero-pressure-gradient 1/7-power-law correlation;
+  White, *Viscous Fluid Flow*; validity `5e5 <= Re_x <= 1e7`).
+- Turbulent, average: `Cf_bar = 0.074 * Re_L^(-1/5)`.
+
+The turbulent correlation is evaluated at the physical `x` from the real
+leading edge (not a virtual-origin correction) -- an explicitly labeled
+simplification; see DESIGN.md for why the more accurate mixed-boundary-
+layer correction was not implemented.
+
+### C_d,f convention
+
+```
+C_d,f = 2 * integral_0^1 Cf(x/c) * [U_e(x/c)/V_inf]^2 d(x/c)
+```
+
+Reference length = chord; both surfaces represented by the same M1
+synthetic `U_e(x/c)` shape (an explicit simplification, since the M1
+model is not upper/lower-surface-resolved); `Cf` from freestream-Reynolds-
+number flat-plate correlations; dynamic-pressure weighting from the actual
+M1 pressure-gradient distribution. Wetted-length/surface-slope corrections
+are neglected.
+
+### Baseline drag-impact results
+
+| Case | `C_d,f` |
+|---|---|
+| Fully laminar reference | 0.002451 |
+| Fully turbulent reference | 0.008730 |
+| Separation-triggered (`x_tr/c = 0.4314`) | 0.005044 |
+
+Separation-triggered drag is **+105.8%** relative to fully laminar and
+**-42.2%** relative to fully turbulent -- i.e. it falls, as physically
+expected, strictly between the two references.
+
+### Prescribed transition-location sensitivity
+
+| `x_tr/c` | `C_d,f` | % vs. laminar | % vs. turbulent |
+|---|---|---|---|
+| 0.1 | 0.008048 | +228.3% | -7.8% |
+| 0.3 | 0.006273 | +155.9% | -28.1% |
+| 0.5 | 0.004464 | +82.1% | -48.9% |
+| 0.7 | 0.003255 | +32.8% | -62.7% |
+| 0.9 | 0.002643 | +7.8% | -69.7% |
+
+Later transition consistently and substantially reduces drag toward the
+laminar reference -- directly demonstrating why maintaining laminar flow
+farther aft matters. The lowest-drag case is **not** called an "optimum"
+(no structural, stall, or off-design constraints are modeled).
+
+### Reproduce Milestone 3
+
+```bash
+python3 scripts/transition_drag_study.py
+python3 scripts/generate_m3_figures.py
+```
+
+### Milestone 3 figures
+
+| File | Content |
+|---|---|
+| `figures/ncrit_transition_sensitivity.png` | `N(x/c)` vs. the sourced `N_crit` sensitivity lines; baseline shows no crossing |
+| `figures/transition_reynolds_map.png` | Transition-event outcome (crossing / separation-first / no-event) vs. `V_inf`/`Re_c` and `N_crit` |
+| `figures/skin_friction_distributions.png` | `Cf(x/c)` for laminar/turbulent/separation-triggered/prescribed cases |
+| `figures/transition_drag_impact.png` | `C_d,f` vs. prescribed `x_tr/c`, with laminar/turbulent references and the separation-triggered case marked |
+
+### Limitations
+
+- `N_crit` is a sensitivity range, not a selected design value; no
+  transition location is asserted as "the" transition point for this
+  project.
+- The skin-friction drag model uses zero-pressure-gradient flat-plate
+  correlations as a bookkeeping approximation over the M1 pressure-
+  gradient velocity distribution -- not a full turbulent pressure-gradient
+  boundary-layer solution.
+- The turbulent correlation's physical-x evaluation neglects the
+  virtual-origin/mixed-boundary-layer history effect (documented, not
+  implemented).
+- The separation-triggered scenario assumes *immediate* transition at
+  separation; no separation-bubble reattachment model is implemented.
+- No form/pressure drag, viscous-inviscid interaction, or 3D effects are
+  modeled -- only 2D section skin friction.
+- Not validated against wind-tunnel or flight-test data.
+
+## What Milestone 3 does NOT model
+
+- A single, selected, "correct" `N_crit` for this project.
+- A turbulent pressure-gradient integral boundary-layer solution.
+- Separation-bubble transition/reattachment physics.
+- Form drag, pressure drag, or 3D/finite-span effects.
+- Any claim of experimental validation.
+
+## Recommended Milestone 4 topic (not started)
+
+Extend the turbulent boundary-layer treatment beyond the flat-plate
+bookkeeping approximation (e.g. a Head's-method or Cebeci-Smith momentum-
+integral turbulent boundary layer driven by the actual M1 `U_e(x)`
+pressure gradient), and/or introduce a simple form-drag / pressure-drag
+estimate to move from a skin-friction-only `C_d,f` toward a more complete
+section drag polar -- with sourced turbulent closure constants audited the
+same way `N_crit` was audited here.

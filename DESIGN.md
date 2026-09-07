@@ -613,3 +613,266 @@ bug but is not:
 
 No case is described as "transitioned" anywhere in this output, because no
 `N_crit` has been selected.
+
+---
+
+# MILESTONE 3: N_crit Transition Criterion, Turbulent Skin Friction, and Drag-Impact Bookkeeping
+
+**Scope reminder:** this milestone selects a *sensitivity range* for the
+external, environment-dependent `N_crit` parameter (never a single
+"recommended" value), locates where the Milestone 2 `N(x)` curve reaches
+each sourced `N_crit` value if it does, and builds a reduced-order
+skin-friction drag bookkeeping model on top of the result. It does not
+select or endorse any one `N_crit` as correct for this project, does not
+claim experimental validation of any drag number, and never relabels the
+Milestone 1 laminar-separation diagnostic as an e^N transition.
+
+## 15. N_crit source audit
+
+Sources actually checked in this session (via live web search/fetch):
+
+1. **Drela's XFOIL documentation** (`xfoil_doc.txt`, hosted at
+   `web.mit.edu/drela/Public/web/xfoil/xfoil_doc.txt` -- fetched and quoted
+   verbatim in this session). Exact quoted text:
+
+   > "The e^n method has the user-specified parameter "Ncrit", which is
+   > the log of the amplification factor of the most-amplified frequency
+   > which triggers transition. A suitable value of this parameter depends
+   > on the ambient disturbance level in which the airfoil operates, and
+   > mimics the effect of such disturbances on transition. Below are
+   > typical values of Ncrit for various situations."
+   >
+   > ```
+   >      situation             Ncrit
+   >   -----------------        -----
+   >   sailplane                12-14
+   >   motorglider              11-13
+   >   clean wind tunnel        10-12
+   >   average wind tunnel        9     <=  standard "e^9 method"
+   >   dirty wind tunnel         4-8
+   > ```
+
+   This is a primary source, directly fetched and quoted verbatim, and it
+   is directly on point: it explicitly lists **sailplane** as a category
+   (`Ncrit = 12-14`), which matches this project's own vehicle type.
+
+2. **Smith & Gamberoni (1956) / van Ingen (1956), and the "e^9 method"**
+   (confirmed via web search, cross-referencing multiple independent
+   summaries): the historical origin of using `N_crit ~= 9` as
+   representative of an "average" (moderate-disturbance) wind-tunnel
+   environment is consistently attributed to this early Smith-Gamberoni/
+   van Ingen work, and is independently corroborated by the XFOIL
+   documentation's own labeling of `Ncrit=9` as "the standard e^9 method."
+   This cross-check between two independently found sources (general
+   literature-summary search results and Drela's primary documentation)
+   is the strongest verification available in-session for this specific
+   number.
+
+**Selected N_crit sensitivity range for this project: {9, 12, 14}.**
+Rationale:
+- `N_crit = 9`: the historical, still-common "average wind tunnel" /
+  "e^9 method" reference value.
+- `N_crit = 12`: the lower bound of Drela's documented "sailplane" range
+  -- directly relevant since this project models a generic sailplane wing
+  section.
+- `N_crit = 14`: the upper bound of the same documented "sailplane" range
+  (quietest free-flight-like disturbance environment considered).
+
+This is a **sensitivity range**, not a single selected design value --
+consistent with the explicit project instruction not to choose or
+recommend an `N_crit`. `N_crit` is treated throughout as an external,
+environment/receptivity-dependent input:
+
+- **Lower `N_crit`** broadly corresponds to a noisier/higher-disturbance
+  environment (more free-stream turbulence, acoustic noise, or surface
+  roughness) -- disturbances need less amplification to become large
+  enough to trigger transition.
+- **Higher `N_crit`** broadly corresponds to a quieter/lower-disturbance
+  environment (e.g. free flight in smooth air) -- disturbances must
+  amplify much more before triggering transition.
+- **This project does not model receptivity explicitly** -- no
+  quantitative turbulence-intensity-to-`N_crit` mapping is implemented or
+  claimed; the sourced table above gives qualitative *situations*
+  (sailplane, wind tunnel grades), not a continuous receptivity model, and
+  this project does not invent one.
+
+## 16. Transition-event logic and crossing interpolation (`transition.py`)
+
+Three mutually exclusive, exhaustively covering outcomes
+(`TransitionStatus`):
+
+- `N_CRIT_CROSSING`: `N(x)` reaches `N_crit` at some station within the
+  Milestone 1 valid (attached-laminar) domain. The crossing is located by
+  linear interpolation between the two bracketing grid stations
+  (`interpolate_crossing`), not rounded to the nearest grid point; the
+  interpolation is exercised directly (not merely through the full
+  pipeline) in `test_interpolate_crossing_*`, including an exact-on-node
+  case and a between-node case with a hand-computed fractional result.
+- `SEPARATION_BEFORE_N_CRIT`: `N(x)` never reaches `N_crit` within the
+  valid domain, and the Milestone 1 Thwaites solution predicts laminar
+  separation (`s_sep is not None`). This is the correct, and actual,
+  outcome for the Milestone 2 baseline case against every value in the
+  sourced sensitivity range (`N_max ~= 3.84 < 9 < 12 < 14`).
+- `NO_EVENT_IN_DOMAIN`: neither event occurs (no crossing, and no
+  predicted separation) -- exercised with a synthetic, hand-constructed
+  `AmplificationSolution` (a hypothetical fully stable case with
+  `s_sep=None`), since the actual project's adverse-gradient synthetic
+  `U_e(x/c)` always predicts separation eventually.
+
+The search for a crossing is *structurally* restricted to
+`asol.s[asol.valid]` -- the same Milestone 1 "reportable" domain used
+throughout Milestone 2 -- so a crossing can never be reported past the M1
+separation diagnostic; this is enforced by construction, not by a
+post-hoc check.
+
+## 17. Separation-triggered scenario (explicitly distinct from N_crit)
+
+`transition.separation_triggered_transition()` builds a
+`SeparationTriggeredScenario` directly from the Milestone 1
+`s_sep`/`x_sep_m` fields, carrying a label string that explicitly states
+it is **not** an e^N crossing (`"separation-triggered (bookkeeping
+assumption, NOT an e^N N_crit crossing)"`). It is used purely as an
+engineering "we have nowhere else to put the assumed transition, since the
+attached-laminar solution ends at separation" bookkeeping input to the
+skin-friction drag model (Section 19), never as, or presented as, an
+e^N-derived result. No more nuanced separated-flow transition treatment
+(e.g. a modeled short/long laminar-separation-bubble reattachment) is
+implemented; the literature on separation-bubble transition (e.g.
+Horton's and related separation-bubble correlations) was not independently
+verified in this session, so the simpler "assumed immediate transition at
+the separation station" is used instead and labeled as such.
+
+## 18. Laminar and turbulent skin-friction correlations (`skin_friction.py`)
+
+**Laminar** (reused directly from `laminar_bl.py`, same Milestone 1 source
+audit -- Schlichting & Gersten; White, *Viscous Fluid Flow*):
+- Local: `Cf,x = 0.664 / sqrt(Re_x)` (`laminar_bl.blasius_cf`, imported
+  and reused, not reimplemented).
+- Average (0 to L): `Cf_bar = 1.328 / sqrt(Re_L)`, the exact closed-form
+  integral of the local expression (`1.328 = 2 * 0.664`, verified in
+  `test_laminar_cf_average_is_twice_local_blasius_coefficient`).
+
+**Turbulent** (White, *Viscous Fluid Flow*, 3rd ed., Ch. 6; Schlichting &
+Gersten; the 1/7-power-law smooth-wall zero-pressure-gradient
+incompressible flat-plate correlation, cross-checked via web search
+against multiple independent sources converging on the same constants):
+- Local: `Cf,x = 0.0592 * Re_x^(-1/5)`.
+- Average (0 to L): `Cf_bar = 0.074 * Re_L^(-1/5)`, again the exact
+  closed-form integral of the local expression
+  (`0.074 = 1.25 * 0.0592`, the correct integration factor for an
+  `x^(-1/5)` power law -- verified both algebraically
+  (`test_turbulent_coefficient_ratio_hand_check`) and by independent
+  numerical integration of the local correlation
+  (`test_turbulent_average_is_exact_integral_of_local`)).
+- **Documented validity range**: `5e5 <= Re_x <= 1e7` (smooth wall,
+  incompressible, zero-pressure-gradient). `is_turbulent_correlation_valid()`
+  flags (does not block) stations outside this range -- most relevant
+  immediately downstream of an early prescribed transition, where local
+  `Re_x` can be well below `5e5`.
+
+**Turbulent-origin treatment**: the turbulent correlation is evaluated at
+the *physical* `x` from the real leading edge, not a virtual-origin-
+shifted coordinate. The literature does document a more accurate
+"mixed-boundary-layer" correction (the classical Prandtl-Schlichting
+composite drag formula, which subtracts a correction term depending on the
+transition Reynolds number to account for the turbulent layer inheriting
+extra momentum-deficit "history" from the preceding laminar run), but this
+project could not independently verify that correction's exact tabulated
+constant against a primary source in this session, so it is **not**
+implemented. Using physical `x` directly is a documented, explicitly
+labeled simplification (see the `skin_friction.py` module docstring),
+consistent with the project instruction to avoid unverified sophistication.
+
+**Leading-edge singularity**: both the laminar and turbulent local `Cf,x`
+correlations formally diverge (`-> infinity`) as `x -> 0`, a genuine
+(non-removable) flat-plate wall-shear singularity, exactly analogous to
+the Blasius `Cf,x` singularity already documented in Milestone 1. Both are
+returned as `inf`, not fabricated, at `x=0`
+(`test_turbulent_correlation_leading_edge_singularity_not_fabricated`).
+
+## 19. Section skin-friction drag normalization
+
+**Derivation** (see `skin_friction.section_cf_drag` docstring for the
+condensed version): with wall shear `tau_w(x) = Cf(x) * 0.5 rho U_e(x)^2`
+(local edge dynamic pressure), the drag force per unit span on one surface
+is `integral_0^c tau_w dx`. Nondimensionalizing by the freestream dynamic
+pressure `0.5 rho V_inf^2` and the chord `c` (the standard 2D airfoil-
+section drag-coefficient convention, reference length = chord, reference
+area = chord per unit span), and substituting `x = s c`:
+
+```
+C_d,f (one surface) = integral_0^1 Cf(s) * [U_e(s)/V_inf]^2 ds
+```
+
+**Two-surface convention**: this project's Milestone 1 synthetic
+`U_e(x/c)` is a single, generic external-velocity shape -- it is not
+upper/lower-surface-resolved (no separate suction-side/pressure-side
+distributions were ever modeled). Milestone 3 makes the explicit,
+documented choice to represent *both* surfaces of the section using this
+same shape (`two_surfaces=True`, the default, doubles the single-surface
+integral). This is a stated simplification, not a claim that the upper and
+lower surfaces have been separately modeled; `two_surfaces=False` is
+available and tested for a single-surface value without the doubling.
+
+**Dynamic-pressure weighting**: `[U_e(s)/V_inf]^2` uses the *actual*
+Milestone 1 synthetic pressure-gradient distribution, while `Cf(s)` itself
+is computed from flat-plate correlations parameterized by a Reynolds
+number based on the *freestream* velocity, `Re_x = V_inf x / nu` (reusing
+`laminar_bl.reynolds_x`). This is a deliberate, stated design choice: it
+avoids reintroducing a full pressure-gradient turbulent integral boundary
+layer (explicitly out of scope), while still letting the region of higher
+local dynamic pressure (near the M1 velocity peak) contribute more to the
+drag integral than the freestream-referenced `Cf(s)` alone would suggest.
+
+**Neglected corrections**: wetted-length/surface-slope effects (a real
+cambered/thick airfoil's wetted arc length per surface slightly exceeds
+the chord; this project uses chordwise `x` as a stand-in for wetted length
+throughout) are not modeled.
+
+## 20. Numerical convergence of the drag integral
+
+The laminar (`x^-1/2`) and turbulent (`x^-1/5`) flat-plate `Cf,x`
+correlations are both formally singular, but integrably so, at the
+leading edge. A **uniform** quadrature grid converges very slowly for the
+laminar case (~5% error at 4001 points against the closed-form average-Cf
+result for this project's baseline case); `skin_friction.build_drag_grid`
+instead uses a **geometrically graded** (log-spaced) grid concentrated
+near the leading edge, which reduces the same-resolution error to
+<0.1% -- verified directly against both closed-form average-Cf formulas
+(`test_section_cf_drag_matches_closed_form_average_{laminar,turbulent}`)
+and via an explicit coarse-vs-fine convergence check
+(`test_build_drag_grid_quadrature_convergence`).
+
+## 21. Prescribed transition-location sensitivity rationale
+
+`x_tr/c in {0.1, 0.3, 0.5, 0.7, 0.9}` is used as an engineering sweep,
+independent of whether any actual N_crit crossing exists for the baseline
+case, so that the marginal value of maintaining laminar flow farther aft
+is directly visible (`figures/transition_drag_impact.png`,
+`scripts/transition_drag_study.py` Section D). The lowest-drag prescribed
+case is never called an "optimum": no structural, stall, off-design, or
+manufacturing-tolerance constraints are modeled anywhere in this project,
+so a true optimum cannot be claimed from this bookkeeping model alone.
+
+## 22. Distinction summary (instability onset / e^N crossing / separation / turbulent bookkeeping)
+
+| Concept | Where computed | What it means | What it is NOT |
+|---|---|---|---|
+| Modeled instability onset | `stability.solve_amplification` | First `x/c` where the M2 proxy declares local instability (`N` starts accumulating from 0 there) | Not a transition point |
+| e^N / N_crit crossing | `transition.locate_transition_n_crit` | First `x/c` where `N(x)` reaches an externally supplied `N_crit`, restricted to the M1 valid domain | Not guaranteed to exist; not claimed accurate beyond the reduced-order proxy's own limitations |
+| M1 laminar-separation diagnostic | `laminar_bl.solve_thwaites` | First `x/c` where Thwaites' `l(lambda)=0` | Not equivalent to transition |
+| Separation-triggered transition (M3 bookkeeping) | `transition.separation_triggered_transition` | Assumed immediate transition at the M1 separation station, used only when no N_crit crossing exists | Never an e^N result; always explicitly labeled |
+| Turbulent skin-friction drag bookkeeping | `skin_friction.py` | Illustrative `C_d,f` from ZPG flat-plate correlations + M1's actual pressure-gradient `U_e(x)` dynamic-pressure weighting | Not a turbulent pressure-gradient integral boundary-layer solution; not validated against experimental drag data |
+
+## 23. What a true Orr-Sommerfeld/PSE calculation and a full turbulent BL solve would add (recap and extension)
+
+In addition to the Milestone 2 list (full local eigenvalue stability,
+receptivity, envelope construction): a true drag prediction for this
+generic section would require (a) a real pressure-gradient turbulent
+momentum-integral or field boundary-layer solution downstream of
+transition (not a ZPG flat-plate correlation), (b) a validated
+laminar-separation-bubble transition/reattachment model if separation
+genuinely precedes transition physically (rather than the simple
+"assumed immediate transition" bookkeeping used here), and (c)
+form/pressure drag and viscous-inviscid interaction effects, none of
+which are modeled in this project.
