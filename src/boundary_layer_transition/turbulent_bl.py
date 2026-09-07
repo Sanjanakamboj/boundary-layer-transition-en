@@ -354,6 +354,8 @@ def solve_turbulent_bl(
     n_report: int = 501,
     rtol: float = 1.0e-8,
     atol: float = 1.0e-10,
+    theta_start_override_m: float | None = None,
+    h_start_override: float | None = None,
 ) -> TurbulentBLSolution:
     """Integrate Head's entrainment method from x_tr_m to the trailing edge
     (or until turbulent separation / an invalid state is detected).
@@ -366,21 +368,44 @@ def solve_turbulent_bl(
     thwaites_sol : ThwaitesSolution
         The Milestone 1 laminar solution, used only to obtain a continuous
         theta at the transition station (see transition_initial_state).
+        Ignored if both override parameters below are given.
     v_inf_mps, nu_m2s : float
         Freestream velocity and kinematic viscosity.
     x_tr_m : float
-        Assumed transition station, m.
+        Assumed transition (or, with the overrides below, turbulent-
+        restart) station, m.
     h_tr : float
         Initial turbulent shape factor at transition (default:
-        H_TR_NOMINAL, the ZPG 1/7-power-law value).
+        H_TR_NOMINAL, the ZPG 1/7-power-law value). Ignored if
+        h_start_override is given.
     n_report : int
         Number of stations at which to report the solution (dense output,
         does not affect the adaptive step size used internally).
     rtol, atol : float
         solve_ivp tolerances, exposed for convergence testing.
+    theta_start_override_m, h_start_override : float, optional
+        When **both** given, bypass transition_initial_state (and its M1
+        laminar-theta interpolation / flat-plate-seed logic) entirely and
+        start the integration at x_tr_m with exactly this (theta, H)
+        state instead. This is purely additive -- existing calls that omit
+        these parameters are completely unaffected -- and exists so that
+        :mod:`separation_bubble` can restart the turbulent solver at a
+        reattachment station using its own bubble-closure restart state
+        (theta_reattach, H_reattach), without reusing the M1 laminar
+        theta interpolation (which is not valid past the M1 laminar-
+        separation diagnostic; see separation_bubble.py for the
+        restart-state derivation).
     """
     chord_m = float(thwaites_sol.x_m[-1])
-    theta_tr_m, h1_tr, x_start_m = transition_initial_state(thwaites_sol, v_inf_mps, nu_m2s, x_tr_m, h_tr)
+    if theta_start_override_m is not None and h_start_override is not None:
+        if not np.isfinite(theta_start_override_m) or theta_start_override_m <= 0.0:
+            raise ValueError(f"theta_start_override_m must be finite and positive, got {theta_start_override_m}")
+        _validate_positive_scalar("h_start_override", h_start_override)
+        theta_tr_m = theta_start_override_m
+        h1_tr = h1_of_h(h_start_override)
+        x_start_m = x_tr_m
+    else:
+        theta_tr_m, h1_tr, x_start_m = transition_initial_state(thwaites_sol, v_inf_mps, nu_m2s, x_tr_m, h_tr)
 
     def rhs(x: float, y: NDArray[np.float64]) -> list[float]:
         # The adaptive integrator routinely *probes* states slightly beyond

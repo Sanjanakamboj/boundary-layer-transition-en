@@ -4,6 +4,7 @@
 **Milestone 2: Reduced-Order Linear-Stability Proxy and e^N Amplification Tracking**
 **Milestone 3: N_crit Transition Criterion, Turbulent Skin Friction, and Drag Impact**
 **Milestone 4: Pressure-Gradient Turbulent Boundary Layer and Transition-to-TE Drag**
+**Milestone 5: Laminar-Separation-Bubble Transition and Post-Separation Drag Closure**
 
 ## Engineering objective
 
@@ -612,15 +613,209 @@ python3 scripts/generate_m4_figures.py
 - Compressible, 3D, or form/pressure-drag effects.
 - Any claim of CFD or experimental validation.
 
-## Recommended Milestone 5 topic (not started)
+---
 
-Milestone 4 found that this project's synthetic adverse gradient drives
-the turbulent boundary layer to separation before the trailing edge in
-every scenario examined. A natural next step is a sourced, reduced-order
-treatment of the post-separation region -- e.g. a documented pressure-
-drag/form-drag estimate for the separated region (rather than the current
-frozen-`Cf` bookkeeping placeholder), and/or a simple, sourced
-laminar-separation-bubble transition model to replace the "instantaneous
-restart" assumption -- to move from a skin-friction-only `C_d,f` toward a
-more complete section drag polar, with any new closure constants audited
-the same way `N_crit` and Head's-method constants were audited here.
+## Milestone 5: laminar-separation-bubble transition and post-separation drag closure
+
+### Why M5 is required
+
+Milestone 4 found two unresolved gaps: (1) at the baseline operating
+point the laminar boundary layer separates before any plausible `N_crit`
+crossing, yet Milestone 4 assumed an *instantaneous* laminar-to-turbulent
+restart right at that separation station; (2) when the restarted
+turbulent layer itself later separated, Milestone 4's drag bookkeeping
+simply froze `Cf` downstream rather than representing the separated
+region's real (typically pressure/form-drag-dominated) aerodynamic
+penalty. Milestone 5 addresses both with a transparent, explicitly
+labeled reduced-order closure.
+
+### Physical sequence modeled
+
+```
+attached laminar BL -> laminar separation (M1 diagnostic, unchanged)
+   -> separated laminar shear layer (not resolved in detail)
+   -> transition in the separated shear layer (x_tr,sep)
+   -> EITHER turbulent reattachment (x_reattach), restarting the M4
+      turbulent solver with a bubble-informed restart state,
+   -> OR open separation (no reattachment).
+```
+
+The Milestone 2 attached-flow e^N amplification model is **never**
+continued through the separated shear layer. If a genuine attached-flow
+`N_crit` crossing already occurs before laminar separation (as in
+Milestone 3's high-`Re` sensitivity), the bubble model is bypassed
+entirely and that crossing is used instead.
+
+### Source audit
+
+- **Horton (1969)**, ARC CP 1073: semi-empirical bubble growth/bursting
+  theory (pressure-rise-limited). Confirmed to exist and describe the
+  right physics via web search; **no compact, digit-verified closed-form
+  correlation** usable with only this project's state variables was
+  found.
+- **Gaster (1967)**, ARC R&M 3595: the classical bursting criterion
+  (`Re_theta` at separation + pressure-gradient parameter). Confirmed via
+  web search to exist -- and **also confirmed, via the same search
+  (citing Diwan, Chetan & Ramesh 2006; Mitra & Ramesh 2019), to be widely
+  regarded as not generally valid** (bursting depends on the bubble's
+  specific pressure trajectory). Not implemented quantitatively, per the
+  explicit project instruction against unverified "universal" equations.
+- **Order-of-magnitude context**: literature-reported bubble lengths of
+  ~20-30% chord at `Re_c ~ 3e4-2e5` (much lower than this project's
+  `Re_c ~ 1.2e6-4.3e6`) informed only the *rough scale* (much shorter) of
+  the chosen sensitivity parameters below -- not a derived Reynolds
+  scaling.
+
+**Conclusion**: no independently verified compact correlation was found,
+so Milestone 5 uses a **transparent parametric sensitivity closure**
+throughout, with every constant explicitly labeled as a project
+assumption (never fit after inspecting drag results).
+
+### Bubble closure parameters
+
+| Scenario | `dx_tr,sep/c` | `dx_reattach/c` | total extent | `K_theta` | `H_reattach` |
+|---|---|---|---|---|---|
+| short | 0.003 | 0.007 | 0.010 | 3.0 | 1.5 |
+| nominal | 0.008 | 0.022 | 0.030 | 5.0 | 1.7 |
+| long | 0.015 | 0.065 | 0.080 | 8.0 | 2.0 |
+| open | 0.008 | -- (no reattachment) | -- | -- | -- |
+
+### Restart logic
+
+`theta_reattach = K_theta * theta_sep` (`theta_sep`: the M1 laminar
+`theta` interpolated exactly at the separation station -- never beyond
+it); `H_reattach` is a declared sensitivity value. The Milestone 4
+turbulent solver gained a purely additive extension (optional
+`theta_start_override_m` / `h_start_override` parameters, default `None`,
+leaving all 44 original Milestone 4 tests unaffected) so it can be
+restarted at `x_reattach` with this bubble-derived state instead of
+re-deriving from (invalid, past-separation) M1 laminar values.
+
+### Open-separation handling
+
+If the parametric reattachment station would fall at or beyond the
+trailing edge, or the `open` scenario is selected directly, no downstream
+turbulent solve is attempted -- an explicit `OPEN_SEPARATION` status is
+returned and the entire region from separation to the trailing edge is
+handed to the separated-drag closure. This is treated as a legitimate
+result, not a failure.
+
+### Separated-drag closure
+
+```
+C_d,sep = K_sep * L_sep^p * [U_e(x_sep)/V_inf]^2
+```
+
+`L_sep` = bubble extent (reattaching case) or `1 - x_sep/c` (open
+separation); `K_sep=0.5`, `p=1.0` are documented nominal (unsourced)
+defaults. Skin friction (`C_d,f,M5`) is laminar before separation, exactly
+**zero** over the unresolved bubble interval (never double-counted with
+`C_d,sep`), and the restarted turbulent `Cf` after reattachment.
+`C_d,total,M5 = C_d,f,M5 + C_d,sep,M5` is enforced as an exact identity in
+code (`DragDecomposition` validates it at construction).
+
+### Distinction among drag quantities
+
+| Quantity | Meaning |
+|---|---|
+| `C_d,f,M3` | Milestone 3 flat-plate turbulent bookkeeping |
+| `C_d,f,M4` | Milestone 4 pressure-gradient turbulent friction |
+| `C_d,f,M5` | Friction over modeled attached + reattached regions only |
+| `C_d,sep,M5` | Separated pressure/form-drag bookkeeping penalty |
+| `C_d,total,M5` | `C_d,f,M5 + C_d,sep,M5` -- a reduced-order sensitivity total, **not** a complete or validated airfoil drag coefficient |
+
+### Baseline M5 outcome
+
+At the baseline (`Re_c ~= 1.2e6`, `N_crit=9`): the nominal-bubble restart
+(`theta_reattach ~= 1.201` mm, `H_reattach=1.7`) reaches the trailing
+edge? **No** -- it separates turbulently again at `x/c ~= 0.670`. This
+holds for short (`x/c~=0.721`), nominal, and long (`x/c~=0.622`) bubbles
+alike: every reattaching scenario examined still separates before the
+trailing edge, echoing Milestone 4's own finding. This is reported as-is.
+
+| Scenario | `C_d,f` | `C_d,sep` | `C_d,total,M5` |
+|---|---|---|---|
+| Fully laminar reference | 0.002451 | 0 | 0.002451 |
+| M3 fully turbulent reference | 0.008730 | 0 | 0.008730 |
+| M4 instantaneous restart | 0.004144 | 0 | 0.004144 |
+| M5 short bubble | 0.003104 | 0.006645 | 0.009749 |
+| M5 nominal bubble | 0.002495 | 0.019936 | 0.022430 |
+| M5 long bubble | 0.002017 | 0.053161 | 0.055178 |
+| M5 open separation | 0.001822 | 0.377848 | 0.379671 |
+
+The open-separation case's `C_d,sep` is dramatically larger than any
+reattaching bubble's because its separated extent (~57% of chord) is an
+order of magnitude larger than any bubble's (1-8% of chord) -- reported
+plainly, not treated as suspicious.
+
+### Reynolds sensitivity
+
+At `V_inf<=45` m/s (`Re_c<~2.2e6`), the mechanism is separation-induced
+(nominal bubble reattaches, then re-separates turbulently); at `V_inf>=60`
+m/s (`Re_c>=2.9e6`), a genuine attached-flow `N_crit=9` crossing occurs
+before laminar separation, bypassing the bubble model entirely and
+dropping `C_d,total,M5` sharply (from ~0.022 to ~0.003) -- a real
+mechanism-change discontinuity, not a modeling artifact.
+
+### Model-parameter sensitivity
+
+A **computed** (not asserted) ranking of maximum `C_d,total,M5` swing:
+bubble/reattachment length `dx_reattach/c` (~378%) and the separated-drag
+coefficient `K_sep` (~267%) dominate comparably; the shear-layer
+transition distance `dx_tr,sep/c` has an intermediate effect (~65%); the
+restart-state parameters `K_theta` and `H_reattach` change the result by
+only a few percent (<=2.3%). Both the bubble geometry and `K_sep` are
+unsourced project assumptions -- this is reported honestly rather than
+collapsed into a single "dominant parameter" claim.
+
+### Reproduce Milestone 5
+
+```bash
+python3 scripts/separation_bubble_drag_study.py
+python3 scripts/generate_m5_figures.py
+```
+
+### Milestone 5 figures
+
+| File | Content |
+|---|---|
+| `figures/laminar_separation_bubble_scenarios.png` | Event timelines for short/nominal/long/open bubbles |
+| `figures/bubble_restart_boundary_layer.png` | Representative nominal-bubble `theta`/`H` history, bubble region shaded (not drawn through) |
+| `figures/m3_m4_m5_drag_comparison.png` | Grouped M3/M4/M5 friction + separated-drag decomposition |
+| `figures/m5_reynolds_sensitivity.png` | `C_d,total,M5`, `C_d,f,M5`, `C_d,sep,M5` vs. `Re_c`, with outcome markers |
+| `figures/m5_model_sensitivity.png` | One-factor sensitivity of `C_d,total,M5` (discrete points, not confidence intervals) |
+
+### Limitations
+
+- The bubble closure is a parametric sensitivity model, not a resolved
+  separated-shear-layer simulation; no bubble length or reattachment
+  point is claimed to be physically predicted.
+- The separated-drag closure is an unsourced bookkeeping form, not a
+  validated pressure/form-drag correlation.
+- A second (post-reattachment) turbulent separation reuses Milestone 4's
+  frozen-`Cf` convention rather than nesting another bubble model.
+- No stall angle, "safe" operating envelope, or complete/certified airfoil
+  drag polar is produced or implied anywhere in this project.
+
+## What Milestone 5 does NOT model
+
+- A resolved separated-shear-layer simulation or CFD/RANS solution.
+- A physically predicted (rather than parametrically assumed) bubble
+  length or reattachment location.
+- A validated pressure/form-drag correlation.
+- Stall angle, flight envelope, or certification-relevant conclusions.
+
+## Recommended Milestone 6 topic (not started)
+
+Two directions follow naturally: (1) extend the post-reattachment
+turbulent-separation handling beyond the frozen-`Cf` placeholder (e.g. a
+nested, clearly-labeled second bubble/separated-drag treatment, or a
+documented decision to accept the current single-level model as
+sufficient for this project's fidelity); and (2) a sourced sensitivity
+study of the M1 external-velocity-distribution shape itself (peak
+location, adverse-gradient severity) to determine how much of this
+project's persistent separation/re-separation behavior is a consequence
+of the specific synthetic `U_e(x/c)` chosen in Milestone 1, versus a
+general feature of strong adverse gradients at this Reynolds-number
+range -- with any new closure constants audited the same way `N_crit` and
+Head's-method / LSB constants were audited here.

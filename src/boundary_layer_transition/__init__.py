@@ -1,6 +1,7 @@
 """Laminar boundary-layer foundation, e^N amplification tracking, N_crit
-transition logic, and pressure-gradient-aware turbulent skin-friction drag
-estimation for a generic sailplane wing section.
+transition logic, pressure-gradient turbulent boundary-layer propagation,
+and a laminar-separation-bubble / post-separation drag closure for a
+generic sailplane wing section.
 
 Milestone 1 established, for a single *generic* (non-manufacturer-matched)
 sailplane wing section:
@@ -30,23 +31,39 @@ layer (Head's entrainment method, Ludwieg-Tillmann skin-friction closure)
 propagated along the real Milestone 1 U_e(x) from an assumed transition
 station to the trailing edge or turbulent separation (:mod:`turbulent_bl`).
 
+Milestone 5 addresses the two largest gaps left by Milestone 4: (a) the
+baseline case's laminar boundary layer separates before any plausible
+N_crit crossing, while Milestone 4 assumed an instantaneous laminar-to-
+turbulent restart there -- Milestone 5 instead models the separated-shear-
+layer transition / turbulent-reattachment sequence as a transparent,
+explicitly labeled parametric sensitivity closure (:mod:`separation_bubble`),
+including an explicit open-separation (no-reattachment) outcome; and (b)
+when a (re-)restarted turbulent layer separates, Milestone 5 introduces a
+distinct, separately labeled separated pressure/form-drag bookkeeping term
+alongside the skin-friction contribution over only the modeled attached/
+reattached surface regions (:mod:`separated_drag`).
+
 Scope boundary: N_crit is an external, environment-dependent input, never
 selected or recommended by this project (see DESIGN.md for the sourced
 sensitivity range used in the study scripts). A Thwaites-predicted
 laminar-separation location is a laminar-boundary-layer diagnostic only, a
 modeled instability onset or accumulated N-factor is an amplification-
-tracking result only, an e^N N_crit crossing and the separation-triggered
-bookkeeping scenario are two explicitly distinct transition assumptions,
-and the turbulent skin-friction results (both the Milestone 3 flat-plate
-bookkeeping and the Milestone 4 pressure-gradient integral method) are
-reduced-order engineering estimates -- none of these are, or substitute
-for, CFD or experimentally validated transition or drag predictions.
+tracking result only, an e^N N_crit crossing, the Milestone 3 separation-
+triggered bookkeeping scenario, and the Milestone 5 separation-bubble
+closure are three explicitly distinct transition assumptions, a Milestone
+5 turbulent (re)separation is distinct from the Milestone 1 laminar
+separation, and no turbulent, bubble, or drag result in this project is,
+or substitutes for, a CFD/RANS solution, an experimentally validated
+transition or drag prediction, a stall angle, a "safe" operating envelope,
+or a complete/certified airfoil drag polar.
 """
 
 from . import (
     external_flow,
     laminar_bl,
     operating_point,
+    separated_drag,
+    separation_bubble,
     skin_friction,
     stability,
     transition,
@@ -57,10 +74,12 @@ __all__ = [
     "external_flow",
     "laminar_bl",
     "operating_point",
+    "separated_drag",
+    "separation_bubble",
     "skin_friction",
     "stability",
     "transition",
     "turbulent_bl",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
